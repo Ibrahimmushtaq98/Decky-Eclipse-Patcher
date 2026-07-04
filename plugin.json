@@ -1,0 +1,11 @@
+{
+  "name": "Eclipse Patcher",
+  "author": "Ibrahim Mushtaq",
+  "flags": [],
+  "api_version": 1,
+  "publish": {
+    "tags": ["mods", "utility", "games"],
+    "description": "Patch and unpatch Steam games with Eclipse mod zips. Automatic backups, previews, and byte-exact removal.",
+    "image": "https://raw.githubusercontent.com/Ibrahimmushtaq98/Decky-Eclipse-Patcher-/main/assets/banner.png"
+  }
+}

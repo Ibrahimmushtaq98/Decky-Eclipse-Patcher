@@ -1,0 +1,22 @@
+# Node / frontend build
+node_modules/
+dist/
+out/
+*.log
+.pnpm-store/
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+
+# Editors / OS
+.vscode/settings.json
+.idea/
+.DS_Store
+Thumbs.db
+
+# Plugin packaging
+*.zip
