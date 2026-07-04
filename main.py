@@ -1,0 +1,206 @@
+"""Decky Eclipse Patcher — plugin entry point.
+
+Thin async wrappers around py_modules/eclipse_patcher. Every method returns
+{"status": "success", ...} or {"status": "error", "message": ...} so the
+frontend never has to parse exceptions.
+"""
+import sys
+from pathlib import Path
+
+PLUGIN_DIR = Path(__file__).parent
+sys.path.insert(0, str(PLUGIN_DIR / "py_modules"))
+
+import decky  # noqa: E402
+from eclipse_patcher import launch_options, patcher, scanner, steam  # noqa: E402
+
+
+def _home() -> Path:
+    return Path(decky.HOME)
+
+
+def _runtime_dir() -> Path:
+    runtime = Path(decky.DECKY_PLUGIN_RUNTIME_DIR)
+    runtime.mkdir(parents=True, exist_ok=True)
+    return runtime
+
+
+def _err(message: str) -> dict:
+    decky.logger.error(message)
+    return {"status": "error", "message": message}
+
+
+def _game(appid: str) -> tuple[dict | None, Path | None]:
+    record = steam.game_record(_home(), str(appid))
+    if not record:
+        return None, None
+    install_root = Path(record["install_path"])
+    return record, (install_root if install_root.is_dir() else None)
+
+
+class Plugin:
+    async def _main(self):
+        decky.logger.info("Eclipse Patcher loaded")
+
+    async def _unload(self):
+        decky.logger.info("Eclipse Patcher unloaded")
+
+    # ── games ────────────────────────────────────────────────────────────────
+
+    async def list_installed_games(self) -> dict:
+        try:
+            runtime = _runtime_dir()
+            games = []
+            for game in steam.find_installed_games(_home()):
+                status = patcher.get_status(runtime, game["appid"], None)
+                games.append(
+                    {
+                        "appid": game["appid"],
+                        "name": game["name"],
+                        "install_found": Path(game["install_path"]).is_dir(),
+                        "patched": status["patched"],
+                    }
+                )
+            games.sort(key=lambda g: g["name"].lower())
+            return {"status": "success", "games": games}
+        except Exception as exc:
+            return _err(f"list_installed_games failed: {exc}")
+
+    async def get_game_mod_status(self, appid: str) -> dict:
+        try:
+            record, install_root = _game(appid)
+            if not record:
+                return _err("Game not found in Steam library.")
+            status = patcher.get_status(_runtime_dir(), appid, install_root)
+            status.update({"status": "success", "appid": str(appid), "name": record["name"]})
+            return status
+        except Exception as exc:
+            return _err(f"get_game_mod_status failed: {exc}")
+
+    # ── scan / apply / remove ────────────────────────────────────────────────
+
+    async def scan_mod_zip(self, appid: str, zip_path: str) -> dict:
+        try:
+            record, install_root = _game(appid)
+            if not record or not install_root:
+                return _err("Game install directory not found.")
+            result = scanner.scan(Path(zip_path).expanduser(), install_root)
+            result["status"] = "success"
+            result["managed_launch_options"] = launch_options.build_managed_launch_options(
+                result["proxy_dlls"]
+            )
+            return result
+        except scanner.ScanError as exc:
+            return _err(str(exc))
+        except Exception as exc:
+            return _err(f"scan_mod_zip failed: {exc}")
+
+    async def apply_mod(self, appid: str, zip_path: str, current_launch_options: str = "") -> dict:
+        try:
+            record, install_root = _game(appid)
+            if not record or not install_root:
+                return _err("Game install directory not found.")
+            if steam.is_game_running(install_root):
+                return _err("Close the game before applying a mod.")
+
+            zip_file = Path(zip_path).expanduser()
+            scan_result = scanner.scan(zip_file, install_root)
+            managed = launch_options.build_managed_launch_options(scan_result["proxy_dlls"])
+            original = current_launch_options or ""
+            if launch_options.is_managed_launch_options(original):
+                original = ""
+
+            manifest = patcher.apply_mod(
+                zip_file,
+                install_root,
+                _runtime_dir(),
+                str(appid),
+                record["name"],
+                scan_result=scan_result,
+                original_launch_options=original,
+                managed_launch_options=managed,
+            )
+            decky.logger.info(f"Applied {manifest['mod_zip_name']} to {record['name']} ({appid})")
+            return {
+                "status": "success",
+                "appid": str(appid),
+                "name": record["name"],
+                "mod_zip_name": manifest["mod_zip_name"],
+                "overwrite_count": scan_result["overwrite_count"],
+                "new_count": scan_result["new_count"],
+                "proxy_dll": scan_result["proxy_dll"],
+                "launch_options": managed,
+                "message": f"Applied {manifest['mod_zip_name']} to {record['name']}.",
+            }
+        except (scanner.ScanError, patcher.PatchError) as exc:
+            return _err(str(exc))
+        except Exception as exc:
+            return _err(f"apply_mod failed: {exc}")
+
+    async def remove_mod(self, appid: str) -> dict:
+        try:
+            record, install_root = _game(appid)
+            if not record or not install_root:
+                return _err("Game install directory not found.")
+            if steam.is_game_running(install_root):
+                return _err("Close the game before removing a mod.")
+            manifest = patcher.load_manifest(_runtime_dir(), str(appid))
+            tolerant = bool(manifest and manifest.get("state") == "applying")
+            report = patcher.remove_mod(_runtime_dir(), str(appid), install_root, tolerant=tolerant)
+            decky.logger.info(f"Removed mod from {record['name']} ({appid}): {report}")
+            message = f"Mod removed from {record['name']}."
+            if report["missing_backups"]:
+                message += (
+                    f" Warning: {len(report['missing_backups'])} backup(s) were missing; "
+                    "run Steam's 'Verify integrity of game files'."
+                )
+            return {
+                "status": "success",
+                "appid": str(appid),
+                "name": record["name"],
+                "restored": len(report["restored"]),
+                "deleted": len(report["deleted"]),
+                "missing_backups": report["missing_backups"],
+                "launch_options": report["original_launch_options"],
+                "message": message,
+            }
+        except patcher.PatchError as exc:
+            return _err(str(exc))
+        except Exception as exc:
+            return _err(f"remove_mod failed: {exc}")
+
+    async def reapply_mod(self, appid: str, current_launch_options: str = "") -> dict:
+        """Re-apply the managed zip after a game update."""
+        try:
+            record, install_root = _game(appid)
+            if not record or not install_root:
+                return _err("Game install directory not found.")
+            managed_zip = patcher.managed_zip_path(_runtime_dir(), str(appid))
+            if not managed_zip.is_file():
+                return _err("No stored mod zip for this game. Apply the mod from a file instead.")
+            # Stage a copy outside the runtime dir, since remove_mod deletes it.
+            staging = managed_zip.parent.parent / f"reapply-{appid}.zip"
+            import shutil
+
+            shutil.copy2(managed_zip, staging)
+            try:
+                removal = await self.remove_mod(appid)
+                if removal["status"] != "success":
+                    return removal
+                return await self.apply_mod(appid, str(staging), current_launch_options)
+            finally:
+                staging.unlink(missing_ok=True)
+        except Exception as exc:
+            return _err(f"reapply_mod failed: {exc}")
+
+    # ── misc ─────────────────────────────────────────────────────────────────
+
+    async def get_path_defaults(self) -> dict:
+        home = _home()
+        return {
+            "status": "success",
+            "home": str(home),
+            "downloads": str(home / "Downloads"),
+        }
+
+    async def log_error(self, error: str) -> None:
+        decky.logger.error(f"FRONTEND: {error}")
