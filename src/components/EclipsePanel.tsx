@@ -27,13 +27,16 @@ import { PatchDetails } from "./PatchDetails";
 import { StatusCard } from "./StatusCard";
 
 let lastSelectedAppId = "";
+// The Decky file picker unmounts the QAM panel, so per-game scan results must
+// live outside React state to survive the remount when the panel reopens.
+const scanCache: Record<string, { zipPath: string; scan: ScanResult }> = {};
 
 export function EclipsePanel() {
   const [games, setGames] = useState<GameEntry[]>([]);
   const [selectedAppId, setSelectedAppId] = useState<string>(() => lastSelectedAppId);
   const [modStatus, setModStatus] = useState<ModStatus | null>(null);
-  const [zipPath, setZipPath] = useState<string>("");
-  const [scan, setScan] = useState<ScanResult | null>(null);
+  const [zipPath, setZipPath] = useState<string>(() => scanCache[lastSelectedAppId]?.zipPath ?? "");
+  const [scan, setScan] = useState<ScanResult | null>(() => scanCache[lastSelectedAppId]?.scan ?? null);
   const [busy, setBusy] = useState<boolean>(false);
   const [scanning, setScanning] = useState<boolean>(false);
   const [statusLoading, setStatusLoading] = useState<boolean>(false);
@@ -82,8 +85,9 @@ export function EclipsePanel() {
   }, [loadGames]);
 
   useEffect(() => {
-    setScan(null);
-    setZipPath("");
+    const cached = scanCache[selectedAppId];
+    setScan(cached?.scan ?? null);
+    setZipPath(cached?.zipPath ?? "");
     setResult("");
     loadStatus(selectedAppId);
   }, [selectedAppId, loadStatus]);
@@ -104,17 +108,23 @@ export function EclipsePanel() {
       // file picker cancel rejects the promise; ignore silently
       return;
     }
+    const appidForScan = selectedAppId;
+    delete scanCache[appidForScan];
     setZipPath(path);
     setScan(null);
     setResult("");
     setScanning(true);
     try {
-      const scanned = await scanModZip(selectedAppId, path);
+      const scanned = await scanModZip(appidForScan, path);
       if (scanned.status !== "success") {
         setResult(`Error: ${scanned.message}`);
         toast(`Scan failed: ${scanned.message}`);
         return;
       }
+      // Cache first so the result survives even if the panel was unmounted
+      // by the file picker; state updates are a no-op if that happened.
+      scanCache[appidForScan] = { zipPath: path, scan: scanned };
+      setZipPath(path);
       setScan(scanned);
     } catch (err) {
       logError(`pickZip/scan: ${String(err)}`);
@@ -150,6 +160,7 @@ export function EclipsePanel() {
             }
             setResult(res.message || "Mod applied.");
             toast(res.message || "Mod applied.");
+            delete scanCache[selectedAppId];
             setScan(null);
             setZipPath("");
             await loadStatus(selectedAppId);

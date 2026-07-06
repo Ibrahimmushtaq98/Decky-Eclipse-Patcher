@@ -108,6 +108,7 @@ class Plugin:
 
     async def apply_mod(self, appid: str, zip_path: str, current_launch_options: str = "") -> dict:
         try:
+            _log(f"apply_mod requested: appid={appid} file={Path(zip_path).name}")
             record, install_root = _game(appid)
             if not record or not install_root:
                 return _err("Game install directory not found.")
