@@ -246,6 +246,12 @@ class Plugin:
         try:
             installed = self._installed_version()
             release = updater.get_latest_release()
+            sha256 = None
+            if release.get("sha256_url"):
+                try:
+                    sha256 = updater.fetch_sha256(release["sha256_url"])
+                except updater.UpdateError:
+                    sha256 = None
             return {
                 "status": "success",
                 "installed_version": installed,
@@ -253,6 +259,8 @@ class Plugin:
                 "latest_title": release["title"],
                 "published_at": release["published_at"],
                 "zip_size": release["zip_size"],
+                "zip_url": release["zip_url"],
+                "sha256": sha256,
                 "notes": release["notes"],
                 "update_available": updater.is_newer(release["tag"], installed),
             }

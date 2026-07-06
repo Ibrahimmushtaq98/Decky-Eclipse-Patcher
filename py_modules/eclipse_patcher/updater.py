@@ -76,6 +76,10 @@ def _get(url: str, timeout: int = 20) -> bytes:
         raise UpdateError(f"Download failed for {url}: {exc}") from exc
 
 
+def fetch_sha256(sha256_url: str) -> str:
+    return _get(sha256_url).decode("utf-8", errors="replace").split()[0].strip()
+
+
 def get_latest_release(repo: str = GITHUB_REPO) -> dict:
     data = json.loads(_get(API_LATEST.format(repo=repo)))
     tag = data.get("tag_name") or ""
@@ -120,8 +124,10 @@ def install_update(zip_url: str, plugin_dir: Path, sha256_url: str | None = None
     plugin_dir = Path(plugin_dir)
     if not os.access(plugin_dir, os.W_OK):
         raise UpdateError(
-            "Plugin directory is not writable. Fix ownership once with: "
-            "sudo chown -R deck:deck ~/homebrew/plugins/decky-eclipse-patcher"
+            "Plugin directory is not writable (Decky re-owns it to root on every "
+            "loader restart). Update via the Decky installer instead, or run: "
+            "sudo chown -R deck:deck ~/homebrew/plugins/decky-eclipse-patcher "
+            "and update immediately without restarting the loader."
         )
     with tempfile.TemporaryDirectory(prefix="eclipse-update-") as tmp:
         tmp_path = Path(tmp)

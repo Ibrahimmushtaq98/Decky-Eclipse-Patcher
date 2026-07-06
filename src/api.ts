@@ -120,6 +120,8 @@ export type UpdateCheck = {
   latest_title?: string;
   published_at?: string;
   zip_size?: number;
+  zip_url?: string;
+  sha256?: string | null;
   notes?: string;
   update_available?: boolean;
 };
