@@ -1,6 +1,6 @@
 {
   "name": "decky-eclipse-patcher",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "description": "Decky Loader plugin to patch/unpatch Steam games with Eclipse mod zips, with automatic backups and clean removal.",
   "type": "module",
   "scripts": {
