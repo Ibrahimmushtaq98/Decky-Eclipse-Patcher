@@ -1,0 +1,58 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+      - run: pip install pytest
+      - name: Run backend tests
+        run: python -m pytest tests/ -v
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+      - run: npm ci
+      - name: Build frontend
+        run: npm run build
+
+      - name: Package plugin zip
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          PKG=out/decky-eclipse-patcher
+          mkdir -p "$PKG"
+          cp -r dist main.py plugin.json package.json LICENSE README.md py_modules "$PKG/"
+          # keep the zip lean: no sourcemap, no bytecode caches
+          rm -f "$PKG"/dist/*.map
+          find "$PKG" -name "__pycache__" -type d -exec rm -rf {} +
+          # stamp the packaged package.json with the tag version
+          node -e "
+            const fs = require('fs');
+            const p = JSON.parse(fs.readFileSync('$PKG/package.json', 'utf8'));
+            p.version = '$VERSION';
+            fs.writeFileSync('$PKG/package.json', JSON.stringify(p, null, 2) + '\n');
+          "
+          cd out && zip -r "decky-eclipse-patcher-v${VERSION}.zip" decky-eclipse-patcher
+          sha256sum "decky-eclipse-patcher-v${VERSION}.zip" > "decky-eclipse-patcher-v${VERSION}.zip.sha256"
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          gh release create "$GITHUB_REF_NAME" \
+            "out/decky-eclipse-patcher-v${VERSION}.zip" \
+            "out/decky-eclipse-patcher-v${VERSION}.zip.sha256" \
+            --title "Eclipse Patcher ${GITHUB_REF_NAME}" \
+            --generate-notes
