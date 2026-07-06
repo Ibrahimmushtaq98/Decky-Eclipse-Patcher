@@ -50,17 +50,36 @@ export function UpdaterSection() {
     return false;
   };
 
+  const waitForInstall = async (expectedTag: string, seconds: number): Promise<boolean> => {
+    for (let i = 0; i < seconds / 3; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 3000));
+      try {
+        const status = await checkForUpdate();
+        if (status.status === "success" && !status.update_available) return true;
+      } catch {
+        // backend restarting mid-update also means progress; keep waiting
+      }
+    }
+    return false;
+  };
+
   const doUpdate = async () => {
     setBusy("update");
     setMessage("");
+    const expectedTag = check?.latest_tag || "";
     try {
       // Preferred: Decky's own installer (runs as root, handles permissions & reload).
       if (await tryDeckyInstaller()) {
-        setMessage("Handed off to the Decky installer — confirm the prompt if one appears.");
-        setCheck(null);
-        return;
+        setMessage("Waiting for the Decky installer… confirm the prompt if one appears.");
+        if (await waitForInstall(expectedTag, 21)) {
+          setMessage(`Updated to ${expectedTag}. Reload the plugin (or restart Steam) to finish.`);
+          toaster.toast({ title: "Eclipse Patcher", body: `Updated to ${expectedTag}.` });
+          setCheck(null);
+          return;
+        }
+        setMessage("Decky installer didn't complete — installing directly instead…");
       }
-      // Fallback: in-place file copy (needs a writable plugin dir).
+      // Fallback: in-place file copy (backend runs as root, so this always works).
       const result = await selfUpdate();
       if (result.status !== "success") throw new Error(result.message || "Update failed.");
       setMessage(result.message || "Updated.");

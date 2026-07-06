@@ -84,6 +84,15 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _fix_owner(path: Path, ref_stat) -> None:
+    """When the backend runs as root, keep written files owned like the game dir."""
+    try:
+        if hasattr(os, "geteuid") and os.geteuid() == 0:
+            os.chown(path, ref_stat.st_uid, ref_stat.st_gid)
+    except OSError:
+        pass
+
+
 def _safe_join(root: Path, relpath: str) -> Path:
     """Join and refuse to escape root (defense in depth after scanner)."""
     target = (root / PurePosixPath(relpath)).resolve()
@@ -164,11 +173,17 @@ def apply_mod(
         except archive.ArchiveError as exc:
             raise PatchError(str(exc)) from exc
         tree = Path(tmp)
+        ref_stat = game_dir.stat()
         for entry in manifest["files"]:
             source = tree / PurePosixPath(entry["zip_path"])
             target = _safe_join(game_dir, entry["relpath"])
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(source, target)
+            _fix_owner(target, ref_stat)
+            parent = target.parent
+            while parent != game_dir and game_dir in parent.parents:
+                _fix_owner(parent, ref_stat)
+                parent = parent.parent
             entry["new_sha256"] = _sha256(target)
 
     # 3) Keep a managed copy of the archive for re-apply.
@@ -189,6 +204,7 @@ def apply_mod(
             "applied_at": manifest["applied_at"],
         },
     )
+    _fix_owner(game_dir / MARKER_FILENAME, game_dir.stat())
     return manifest
 
 
@@ -218,6 +234,7 @@ def remove_mod(runtime_dir: Path, appid: str, game_dir: Path, tolerant: bool = F
             if backup.is_file():
                 target.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(backup, target)
+                _fix_owner(target, game_dir.stat())
                 report["restored"].append(relpath)
             elif entry.get("orig_sha256") is None and manifest.get("state") == "applying":
                 # Interrupted before this file was backed up -> it was never

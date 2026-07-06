@@ -126,6 +126,10 @@ export function EclipsePanel() {
       scanCache[appidForScan] = { zipPath: path, scan: scanned };
       setZipPath(path);
       setScan(scanned);
+      toast(
+        `Scan complete: ${scanned.overwrite_count} overwrite, ${scanned.new_count} new. ` +
+          "Review and press Apply Mod."
+      );
     } catch (err) {
       logError(`pickZip/scan: ${String(err)}`);
       setResult(`Error: ${String(err)}`);
@@ -135,46 +139,31 @@ export function EclipsePanel() {
     }
   };
 
-  const doApply = () => {
+  const doApply = async () => {
     if (!scan || !selectedAppId) return;
-    const game = games.find((g) => g.appid === selectedAppId);
-    showModal(
-      <ConfirmModal
-        strTitle={`Apply ${scan.zip_name} to ${game?.name ?? "game"}?`}
-        strDescription={
-          `${scan.overwrite_count} file(s) will be backed up and overwritten, ` +
-          `${scan.new_count} new file(s) added.` +
-          (scan.proxy_dll ? ` Launch options will be set for ${scan.proxy_dll}.` : "") +
-          " You can fully revert with Remove Mod."
-        }
-        strOKButtonText="Apply Mod"
-        strCancelButtonText="Cancel"
-        onOK={async () => {
-          setBusy(true);
-          try {
-            const current = await getAppLaunchOptions(Number(selectedAppId));
-            const res = await applyMod(selectedAppId, zipPath, current);
-            if (res.status !== "success") throw new Error(res.message || "Apply failed.");
-            if (res.launch_options) {
-              setAppLaunchOptions(Number(selectedAppId), res.launch_options);
-            }
-            setResult(res.message || "Mod applied.");
-            toast(res.message || "Mod applied.");
-            delete scanCache[selectedAppId];
-            setScan(null);
-            setZipPath("");
-            await loadStatus(selectedAppId);
-            await loadGames();
-          } catch (err) {
-            logError(`apply: ${String(err)}`);
-            setResult(`Error: ${String(err)}`);
-            toast(String(err));
-          } finally {
-            setBusy(false);
-          }
-        }}
-      />
-    );
+    setBusy(true);
+    setResult("Applying mod\u2026");
+    try {
+      const current = await getAppLaunchOptions(Number(selectedAppId));
+      const res = await applyMod(selectedAppId, zipPath, current);
+      if (res.status !== "success") throw new Error(res.message || "Apply failed.");
+      if (res.launch_options) {
+        setAppLaunchOptions(Number(selectedAppId), res.launch_options);
+      }
+      setResult(res.message || "Mod applied.");
+      toast(res.message || "Mod applied.");
+      delete scanCache[selectedAppId];
+      setScan(null);
+      setZipPath("");
+      await loadStatus(selectedAppId);
+      await loadGames();
+    } catch (err) {
+      logError(`apply: ${String(err)}`);
+      setResult(`Error: ${String(err)}`);
+      toast(String(err));
+    } finally {
+      setBusy(false);
+    }
   };
 
   const doRemove = () => {
