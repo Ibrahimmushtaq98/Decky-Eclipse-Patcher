@@ -47,7 +47,8 @@ def test_apply_then_remove_is_byte_identical(game_dir, mirror_zip, runtime_dir, 
     assert (game_dir / "engine" / "renderer.dll").read_bytes() == b"RENDER-V2-MODDED"
     assert (game_dir / "eclipse" / "shaders.fx").is_file()
     assert (game_dir / patcher.MARKER_FILENAME).is_file()
-    assert patcher.managed_zip_path(runtime_dir, APPID).is_file()
+    managed = patcher.managed_zip_path(runtime_dir, APPID)
+    assert managed is not None and managed.suffix == ".zip"
 
     report = patcher.remove_mod(runtime_dir, APPID, game_dir)
     assert report["original_launch_options"] == "PROTON_LOG=1 %command%"
@@ -137,6 +138,7 @@ def test_status_lifecycle(game_dir, mirror_zip, runtime_dir):
 def test_reapply_from_managed_zip(game_dir, mirror_zip, runtime_dir, tmp_path):
     patcher.apply_mod(mirror_zip, game_dir, runtime_dir, APPID, "Eclipse Quest")
     managed = patcher.managed_zip_path(runtime_dir, APPID)
+    assert managed is not None
     staging = tmp_path / "staged_mod.zip"
     shutil.copy2(managed, staging)
 
@@ -146,3 +148,25 @@ def test_reapply_from_managed_zip(game_dir, mirror_zip, runtime_dir, tmp_path):
     result = scanner.scan(staging, game_dir)
     patcher.apply_mod(staging, game_dir, runtime_dir, APPID, "Eclipse Quest", scan_result=result)
     assert (game_dir / "engine" / "renderer.dll").read_bytes() == b"RENDER-V2-MODDED"
+
+
+def test_patch_details(game_dir, mirror_zip, runtime_dir):
+    assert patcher.get_patch_details(runtime_dir, APPID, game_dir) == {"patched": False}
+
+    patcher.apply_mod(mirror_zip, game_dir, runtime_dir, APPID, "Eclipse Quest")
+    details = patcher.get_patch_details(runtime_dir, APPID, game_dir)
+    assert details["patched"] and details["state"] == "applied"
+    assert details["counts"] == {"intact": 5, "modified": 0, "missing": 0, "unknown": 0}
+    assert details["files_truncated"] == 0
+    by_path = {f["relpath"]: f for f in details["files"]}
+    assert by_path["engine/renderer.dll"]["action"] == "overwrite"
+    assert by_path["engine/renderer.dll"]["backup_present"] is True
+    assert by_path["dxgi.dll"]["action"] == "new"
+    assert by_path["dxgi.dll"]["backup_present"] is False
+
+    # clobber one file, delete another -> states reflect it
+    (game_dir / "engine" / "renderer.dll").write_bytes(b"UPDATED")
+    (game_dir / "eclipse" / "shaders.fx").unlink()
+    details = patcher.get_patch_details(runtime_dir, APPID, game_dir)
+    assert details["counts"]["modified"] == 1
+    assert details["counts"]["missing"] == 1

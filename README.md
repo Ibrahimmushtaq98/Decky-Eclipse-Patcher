@@ -6,14 +6,19 @@ on Steam Deck games — with automatic backups and byte-exact unpatching.
 
 ## How it works
 
-1. Download an Eclipse mod zip for your game (e.g. from Nexus Mods) to your Deck.
-2. Open the plugin from the Quick Access menu, pick the game, pick the zip.
-3. The plugin scans the zip against the game's install folder and shows a preview:
+1. Download an Eclipse mod archive (`.zip`, `.rar`, or `.7z`) for your game
+   (e.g. from Nexus Mods) to your Deck.
+2. Open the plugin from the Quick Access menu, pick the game, pick the file.
+3. The plugin scans the archive against the game's install folder and shows a preview:
    which files will be **overwritten** (backed up first) and which are **new**.
 4. Apply. If the mod ships proxy DLLs (`dxgi.dll`, etc.), launch options
    (`WINEDLLOVERRIDES=...`) are set automatically.
 5. Remove Mod restores every backed-up file, deletes everything the mod added,
    and restores your original launch options.
+6. "Show patch details" lists every file the mod touched and whether it is
+   still intact, plus backups, hashes, and launch options — useful for debugging.
+
+`.rar`/`.7z` extraction uses the system's `7z` or `bsdtar` (both present on SteamOS).
 
 State (manifests, backups, a managed copy of the mod zip) lives in the plugin's
 runtime directory, so you can re-apply a mod after a game update without

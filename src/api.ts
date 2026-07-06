@@ -79,4 +79,35 @@ export const reapplyMod = callable<[appid: string, current_launch_options: strin
 export const getPathDefaults = callable<[], { status: string; home?: string; downloads?: string }>(
   "get_path_defaults"
 );
+
+export type PatchFileDetail = {
+  relpath: string;
+  action: "overwrite" | "new";
+  state: "intact" | "modified" | "missing" | "unknown";
+  backup_present: boolean;
+};
+
+export type PatchDetails = {
+  status: string;
+  message?: string;
+  appid?: string;
+  name?: string | null;
+  patched: boolean;
+  state?: string;
+  mod_zip_name?: string;
+  mod_zip_sha256?: string;
+  applied_at?: string;
+  install_root?: string;
+  zip_root_prefix?: string;
+  proxy_dlls?: string[];
+  original_launch_options?: string;
+  managed_launch_options?: string;
+  created_dirs?: string[];
+  managed_zip?: string | null;
+  counts?: { intact: number; modified: number; missing: number; unknown: number };
+  files?: PatchFileDetail[];
+  files_truncated?: number;
+};
+
+export const getPatchDetails = callable<[appid: string], PatchDetails>("get_patch_details");
 export const logError = callable<[error: string], void>("log_error");

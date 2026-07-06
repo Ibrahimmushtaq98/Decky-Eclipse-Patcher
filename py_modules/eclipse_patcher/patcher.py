@@ -16,11 +16,11 @@ import hashlib
 import json
 import os
 import shutil
-import zipfile
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 
-from . import scanner
+from . import archive, scanner
 
 MANIFEST_SCHEMA = 1
 MARKER_FILENAME = "ECLIPSE_PATCH.json"
@@ -41,8 +41,18 @@ def backups_dir(runtime_dir: Path, appid: str) -> Path:
     return runtime_dir / "backups" / appid
 
 
-def managed_zip_path(runtime_dir: Path, appid: str) -> Path:
-    return runtime_dir / "mods" / appid / "mod.zip"
+def managed_mod_dir(runtime_dir: Path, appid: str) -> Path:
+    return runtime_dir / "mods" / appid
+
+
+def managed_zip_path(runtime_dir: Path, appid: str) -> Path | None:
+    """The stored copy of the applied archive (mod.zip / mod.rar / mod.7z)."""
+    mod_dir = managed_mod_dir(runtime_dir, appid)
+    if mod_dir.is_dir():
+        for candidate in sorted(mod_dir.glob("mod.*")):
+            if candidate.is_file():
+                return candidate
+    return None
 
 
 def load_manifest(runtime_dir: Path, appid: str) -> dict | None:
@@ -148,18 +158,23 @@ def apply_mod(
     _write_json_atomic(manifest_path(runtime_dir, appid), manifest)
 
     # 2) Extract mod files (backups are safe now).
-    with zipfile.ZipFile(zip_path) as zf:
+    with tempfile.TemporaryDirectory(prefix="eclipse-apply-") as tmp:
+        try:
+            archive.extract_archive(zip_path, Path(tmp))
+        except archive.ArchiveError as exc:
+            raise PatchError(str(exc)) from exc
+        tree = Path(tmp)
         for entry in manifest["files"]:
+            source = tree / PurePosixPath(entry["zip_path"])
             target = _safe_join(game_dir, entry["relpath"])
             target.parent.mkdir(parents=True, exist_ok=True)
-            with zf.open(entry["zip_path"]) as src, open(target, "wb") as dst:
-                shutil.copyfileobj(src, dst)
+            shutil.copy2(source, target)
             entry["new_sha256"] = _sha256(target)
 
-    # 3) Keep a managed copy of the zip for re-apply.
-    managed = managed_zip_path(runtime_dir, appid)
-    managed.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(zip_path, managed)
+    # 3) Keep a managed copy of the archive for re-apply.
+    mod_dir = managed_mod_dir(runtime_dir, appid)
+    mod_dir.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(zip_path, mod_dir / f"mod{zip_path.suffix.lower()}")
 
     # 4) Finalize.
     manifest["state"] = "applied"
@@ -225,7 +240,7 @@ def remove_mod(runtime_dir: Path, appid: str, game_dir: Path, tolerant: bool = F
         marker.unlink()
 
     shutil.rmtree(backup_root, ignore_errors=True)
-    shutil.rmtree(managed_zip_path(runtime_dir, appid).parent, ignore_errors=True)
+    shutil.rmtree(managed_mod_dir(runtime_dir, appid), ignore_errors=True)
     manifest_file = manifest_path(runtime_dir, appid)
     if manifest_file.is_file():
         manifest_file.unlink()
@@ -274,5 +289,60 @@ def get_status(runtime_dir: Path, appid: str, game_dir: Path | None) -> dict:
         "files_modified": modified,
         "files_missing": missing,
         "file_count": len(manifest.get("files", [])),
-        "has_managed_zip": managed_zip_path(runtime_dir, appid).is_file(),
+        "has_managed_zip": managed_zip_path(runtime_dir, appid) is not None,
+    }
+
+
+# ── per-game debug details ────────────────────────────────────────────────────
+
+def get_patch_details(runtime_dir: Path, appid: str, game_dir: Path | None, max_files: int = 300) -> dict:
+    """Full per-file breakdown of what a mod changed — for the details view."""
+    appid = str(appid)
+    manifest = load_manifest(runtime_dir, appid)
+    if manifest is None:
+        return {"patched": False}
+
+    backup_root = backups_dir(runtime_dir, appid)
+    files: list[dict] = []
+    counts = {"intact": 0, "modified": 0, "missing": 0, "unknown": 0}
+    for entry in manifest.get("files", []):
+        relpath = entry["relpath"]
+        state = "unknown"
+        if game_dir is not None and game_dir.is_dir():
+            target = game_dir / PurePosixPath(relpath)
+            if not target.is_file():
+                state = "missing"
+            elif entry.get("new_sha256") and _sha256(target) == entry["new_sha256"]:
+                state = "intact"
+            else:
+                state = "modified"
+        counts[state] += 1
+        if len(files) < max_files:
+            files.append(
+                {
+                    "relpath": relpath,
+                    "action": entry["action"],
+                    "state": state,
+                    "backup_present": entry["action"] == "overwrite"
+                    and (backup_root / relpath).is_file(),
+                }
+            )
+
+    managed = managed_zip_path(runtime_dir, appid)
+    return {
+        "patched": True,
+        "state": manifest.get("state"),
+        "mod_zip_name": manifest.get("mod_zip_name"),
+        "mod_zip_sha256": manifest.get("mod_zip_sha256"),
+        "applied_at": manifest.get("applied_at"),
+        "install_root": manifest.get("install_root"),
+        "zip_root_prefix": manifest.get("zip_root_prefix", ""),
+        "proxy_dlls": manifest.get("proxy_dlls", []),
+        "original_launch_options": manifest.get("original_launch_options", ""),
+        "managed_launch_options": manifest.get("managed_launch_options", ""),
+        "created_dirs": manifest.get("created_dirs", []),
+        "managed_zip": str(managed) if managed else None,
+        "counts": counts,
+        "files": files,
+        "files_truncated": max(0, len(manifest.get("files", [])) - len(files)),
     }

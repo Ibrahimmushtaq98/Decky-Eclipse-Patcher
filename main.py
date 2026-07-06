@@ -175,10 +175,10 @@ class Plugin:
             if not record or not install_root:
                 return _err("Game install directory not found.")
             managed_zip = patcher.managed_zip_path(_runtime_dir(), str(appid))
-            if not managed_zip.is_file():
-                return _err("No stored mod zip for this game. Apply the mod from a file instead.")
-            # Stage a copy outside the runtime dir, since remove_mod deletes it.
-            staging = managed_zip.parent.parent / f"reapply-{appid}.zip"
+            if managed_zip is None:
+                return _err("No stored mod archive for this game. Apply the mod from a file instead.")
+            # Stage a copy outside the mod dir, since remove_mod deletes it.
+            staging = managed_zip.parent.parent / f"reapply-{appid}{managed_zip.suffix}"
             import shutil
 
             shutil.copy2(managed_zip, staging)
@@ -191,6 +191,25 @@ class Plugin:
                 staging.unlink(missing_ok=True)
         except Exception as exc:
             return _err(f"reapply_mod failed: {exc}")
+
+    async def get_patch_details(self, appid: str) -> dict:
+        """Per-file debug breakdown for the details view (and the logs)."""
+        try:
+            record, install_root = _game(appid)
+            details = patcher.get_patch_details(_runtime_dir(), str(appid), install_root)
+            details["status"] = "success"
+            details["appid"] = str(appid)
+            details["name"] = record["name"] if record else None
+            if details.get("patched"):
+                counts = details.get("counts", {})
+                decky.logger.info(
+                    f"[details] appid={appid} mod={details.get('mod_zip_name')} "
+                    f"state={details.get('state')} intact={counts.get('intact')} "
+                    f"modified={counts.get('modified')} missing={counts.get('missing')}"
+                )
+            return details
+        except Exception as exc:
+            return _err(f"get_patch_details failed: {exc}")
 
     # ── misc ─────────────────────────────────────────────────────────────────
 

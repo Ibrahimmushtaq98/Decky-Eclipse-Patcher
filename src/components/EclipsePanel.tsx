@@ -23,6 +23,7 @@ import {
 } from "../api";
 import { getAppLaunchOptions, setAppLaunchOptions } from "../steamClient";
 import { ModPreview } from "./ModPreview";
+import { PatchDetails } from "./PatchDetails";
 import { StatusCard } from "./StatusCard";
 
 let lastSelectedAppId = "";
@@ -88,6 +89,8 @@ export function EclipsePanel() {
       const start = defaults.downloads || defaults.home || "/home/deck";
       const file = await openFilePicker(FileSelectionType.FILE, start, true, true, undefined, [
         "zip",
+        "rar",
+        "7z",
       ]);
       if (!file?.realpath && !file?.path) return;
       const path = file.realpath || file.path;
@@ -225,7 +228,7 @@ export function EclipsePanel() {
       {selectedAppId && !patched ? (
         <PanelSectionRow>
           <ButtonItem layout="below" onClick={pickZip} disabled={busy}>
-            {zipPath ? "Choose a different zip…" : "Choose mod zip…"}
+            {zipPath ? "Choose a different file…" : "Choose mod file (zip/rar/7z)…"}
           </ButtonItem>
         </PanelSectionRow>
       ) : null}
@@ -243,6 +246,7 @@ export function EclipsePanel() {
 
       {patched ? (
         <>
+          <PatchDetails appid={selectedAppId} />
           {modStatus?.state === "modified" && modStatus?.has_managed_zip ? (
             <PanelSectionRow>
               <ButtonItem layout="below" onClick={doReapply} disabled={busy}>
