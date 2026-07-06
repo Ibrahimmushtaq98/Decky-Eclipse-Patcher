@@ -251,6 +251,20 @@ export function EclipsePanel() {
         </PanelSectionRow>
       ) : null}
 
+      {result ? (
+        <PanelSectionRow>
+          <div
+            style={{
+              fontSize: "13px",
+              whiteSpace: "pre-wrap",
+              color: result.startsWith("Error") ? "#ef4444" : "#22c55e",
+            }}
+          >
+            {result}
+          </div>
+        </PanelSectionRow>
+      ) : null}
+
       {selectedAppId && modStatus && patched ? <StatusCard modStatus={modStatus} /> : null}
 
       {selectedAppId && !patched && !statusLoading ? (
@@ -304,19 +318,6 @@ export function EclipsePanel() {
         </>
       ) : null}
 
-      {result ? (
-        <PanelSectionRow>
-          <div
-            style={{
-              fontSize: "13px",
-              whiteSpace: "pre-wrap",
-              color: result.startsWith("Error") ? "#ef4444" : "#22c55e",
-            }}
-          >
-            {result}
-          </div>
-        </PanelSectionRow>
-      ) : null}
     </PanelSection>
   );
 }

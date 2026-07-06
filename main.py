@@ -11,7 +11,7 @@ PLUGIN_DIR = Path(__file__).parent
 sys.path.insert(0, str(PLUGIN_DIR / "py_modules"))
 
 import decky  # noqa: E402
-from eclipse_patcher import launch_options, patcher, scanner, steam, updater  # noqa: E402
+from eclipse_patcher import activity, launch_options, patcher, scanner, steam, updater  # noqa: E402
 
 
 def _home() -> Path:
@@ -26,7 +26,13 @@ def _runtime_dir() -> Path:
 
 def _err(message: str) -> dict:
     decky.logger.error(message)
+    activity.log_event(_runtime_dir(), f"ERROR: {message}")
     return {"status": "error", "message": message}
+
+
+def _log(message: str) -> None:
+    decky.logger.info(message)
+    activity.log_event(_runtime_dir(), message)
 
 
 def _game(appid: str) -> tuple[dict | None, Path | None]:
@@ -84,6 +90,12 @@ class Plugin:
             if not record or not install_root:
                 return _err("Game install directory not found.")
             result = scanner.scan(Path(zip_path).expanduser(), install_root)
+            _log(
+                f"Scanned {result['zip_name']} vs {record['name']}: "
+                f"{result['overwrite_count']} overwrite, {result['new_count']} new, "
+                f"proxy={result['proxy_dll'] or 'none'}"
+                + (f", warnings={len(result['warnings'])}" if result["warnings"] else "")
+            )
             result["status"] = "success"
             result["managed_launch_options"] = launch_options.build_managed_launch_options(
                 result["proxy_dlls"]
@@ -119,7 +131,11 @@ class Plugin:
                 original_launch_options=original,
                 managed_launch_options=managed,
             )
-            decky.logger.info(f"Applied {manifest['mod_zip_name']} to {record['name']} ({appid})")
+            _log(
+                f"Applied {manifest['mod_zip_name']} to {record['name']} ({appid}): "
+                f"{scan_result['overwrite_count']} backed up + overwritten, "
+                f"{scan_result['new_count']} added, launch options: {managed or 'none'}"
+            )
             return {
                 "status": "success",
                 "appid": str(appid),
@@ -146,7 +162,11 @@ class Plugin:
             manifest = patcher.load_manifest(_runtime_dir(), str(appid))
             tolerant = bool(manifest and manifest.get("state") == "applying")
             report = patcher.remove_mod(_runtime_dir(), str(appid), install_root, tolerant=tolerant)
-            decky.logger.info(f"Removed mod from {record['name']} ({appid}): {report}")
+            _log(
+                f"Removed mod from {record['name']} ({appid}): "
+                f"{len(report['restored'])} restored, {len(report['deleted'])} deleted, "
+                f"{len(report['missing_backups'])} backups missing"
+            )
             message = f"Mod removed from {record['name']}."
             if report["missing_backups"]:
                 message += (
@@ -250,7 +270,7 @@ class Plugin:
             updater.install_update(
                 release["zip_url"], Path(decky.DECKY_PLUGIN_DIR), release["sha256_url"]
             )
-            decky.logger.info(f"Self-updated {installed} -> {release['tag']}")
+            _log(f"Self-updated {installed} -> {release['tag']}")
             return {
                 "status": "success",
                 "updated": True,
@@ -263,6 +283,12 @@ class Plugin:
             return _err(str(exc))
         except Exception as exc:
             return _err(f"self_update failed: {exc}")
+
+    async def get_activity_log(self, limit: int = 80) -> dict:
+        try:
+            return {"status": "success", "lines": activity.read_log(_runtime_dir(), int(limit))}
+        except Exception as exc:
+            return {"status": "error", "message": str(exc), "lines": []}
 
     # ── misc ─────────────────────────────────────────────────────────────────
 

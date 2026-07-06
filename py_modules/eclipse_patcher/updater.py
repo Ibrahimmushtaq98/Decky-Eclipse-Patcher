@@ -11,6 +11,7 @@ import json
 import os
 import re
 import shutil
+import ssl
 import tempfile
 import urllib.request
 from pathlib import Path
@@ -24,6 +25,31 @@ USER_AGENT = "decky-eclipse-patcher"
 
 class UpdateError(RuntimeError):
     pass
+
+
+# Decky's plugin Python often can't locate the system CA store, which makes
+# urllib fail with CERTIFICATE_VERIFY_FAILED. Find a real CA bundle instead.
+_CA_BUNDLE_CANDIDATES = [
+    "/etc/ssl/certs/ca-certificates.crt",  # SteamOS / Arch
+    "/etc/ssl/cert.pem",
+    "/etc/pki/tls/certs/ca-bundle.crt",
+]
+
+
+def _ssl_context() -> ssl.SSLContext:
+    try:
+        context = ssl.create_default_context()
+        if context.cert_store_stats().get("x509_ca", 0) > 0:
+            return context
+    except Exception:
+        pass
+    for bundle in _CA_BUNDLE_CANDIDATES:
+        if Path(bundle).is_file():
+            try:
+                return ssl.create_default_context(cafile=bundle)
+            except Exception:
+                continue
+    return ssl.create_default_context()
 
 
 def parse_version(text: str) -> tuple[int, ...]:
@@ -41,7 +67,10 @@ def _get(url: str, timeout: int = 20) -> bytes:
         url, headers={"User-Agent": USER_AGENT, "Accept": "application/vnd.github+json"}
     )
     try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:
+        if url.startswith("file:"):
+            with urllib.request.urlopen(request, timeout=timeout) as response:
+                return response.read()
+        with urllib.request.urlopen(request, timeout=timeout, context=_ssl_context()) as response:
             return response.read()
     except Exception as exc:
         raise UpdateError(f"Download failed for {url}: {exc}") from exc

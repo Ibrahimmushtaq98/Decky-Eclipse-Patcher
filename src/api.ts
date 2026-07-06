@@ -128,3 +128,7 @@ export const checkForUpdate = callable<[], UpdateCheck>("check_for_update");
 export const selfUpdate = callable<[], { status: string; message?: string; updated?: boolean }>(
   "self_update"
 );
+
+export const getActivityLog = callable<[limit?: number], { status: string; message?: string; lines: string[] }>(
+  "get_activity_log"
+);
