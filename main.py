@@ -11,7 +11,7 @@ PLUGIN_DIR = Path(__file__).parent
 sys.path.insert(0, str(PLUGIN_DIR / "py_modules"))
 
 import decky  # noqa: E402
-from eclipse_patcher import launch_options, patcher, scanner, steam  # noqa: E402
+from eclipse_patcher import launch_options, patcher, scanner, steam, updater  # noqa: E402
 
 
 def _home() -> Path:
@@ -210,6 +210,59 @@ class Plugin:
             return details
         except Exception as exc:
             return _err(f"get_patch_details failed: {exc}")
+
+    # ── self-update ──────────────────────────────────────────────────────────
+
+    def _installed_version(self) -> str:
+        try:
+            import json as _json
+
+            package = _json.loads((Path(decky.DECKY_PLUGIN_DIR) / "package.json").read_text())
+            return str(package.get("version", "0.0.0"))
+        except Exception:
+            return "0.0.0"
+
+    async def check_for_update(self) -> dict:
+        try:
+            installed = self._installed_version()
+            release = updater.get_latest_release()
+            return {
+                "status": "success",
+                "installed_version": installed,
+                "latest_tag": release["tag"],
+                "latest_title": release["title"],
+                "published_at": release["published_at"],
+                "zip_size": release["zip_size"],
+                "notes": release["notes"],
+                "update_available": updater.is_newer(release["tag"], installed),
+            }
+        except updater.UpdateError as exc:
+            return _err(str(exc))
+        except Exception as exc:
+            return _err(f"check_for_update failed: {exc}")
+
+    async def self_update(self) -> dict:
+        try:
+            installed = self._installed_version()
+            release = updater.get_latest_release()
+            if not updater.is_newer(release["tag"], installed):
+                return {"status": "success", "updated": False, "message": "Already up to date."}
+            updater.install_update(
+                release["zip_url"], Path(decky.DECKY_PLUGIN_DIR), release["sha256_url"]
+            )
+            decky.logger.info(f"Self-updated {installed} -> {release['tag']}")
+            return {
+                "status": "success",
+                "updated": True,
+                "message": (
+                    f"Updated to {release['tag']}. Restart Steam (or reload the plugin "
+                    "from Decky settings) to finish."
+                ),
+            }
+        except updater.UpdateError as exc:
+            return _err(str(exc))
+        except Exception as exc:
+            return _err(f"self_update failed: {exc}")
 
     # ── misc ─────────────────────────────────────────────────────────────────
 

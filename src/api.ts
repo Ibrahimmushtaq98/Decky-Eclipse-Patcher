@@ -111,3 +111,20 @@ export type PatchDetails = {
 
 export const getPatchDetails = callable<[appid: string], PatchDetails>("get_patch_details");
 export const logError = callable<[error: string], void>("log_error");
+
+export type UpdateCheck = {
+  status: string;
+  message?: string;
+  installed_version?: string;
+  latest_tag?: string;
+  latest_title?: string;
+  published_at?: string;
+  zip_size?: number;
+  notes?: string;
+  update_available?: boolean;
+};
+
+export const checkForUpdate = callable<[], UpdateCheck>("check_for_update");
+export const selfUpdate = callable<[], { status: string; message?: string; updated?: boolean }>(
+  "self_update"
+);

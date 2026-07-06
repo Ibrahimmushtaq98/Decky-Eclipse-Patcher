@@ -35,6 +35,8 @@ export function EclipsePanel() {
   const [zipPath, setZipPath] = useState<string>("");
   const [scan, setScan] = useState<ScanResult | null>(null);
   const [busy, setBusy] = useState<boolean>(false);
+  const [scanning, setScanning] = useState<boolean>(false);
+  const [statusLoading, setStatusLoading] = useState<boolean>(false);
   const [result, setResult] = useState<string>("");
 
   const toast = (body: string) => toaster.toast({ title: "Eclipse Patcher", body });
@@ -63,12 +65,15 @@ export function EclipsePanel() {
       setModStatus(null);
       return;
     }
+    setStatusLoading(true);
     try {
       const status = await getGameModStatus(appid);
       setModStatus(status);
     } catch (err) {
       logError(`loadStatus: ${String(err)}`);
       setModStatus(null);
+    } finally {
+      setStatusLoading(false);
     }
   }, []);
 
@@ -84,6 +89,7 @@ export function EclipsePanel() {
   }, [selectedAppId, loadStatus]);
 
   const pickZip = async () => {
+    let path = "";
     try {
       const defaults = await getPathDefaults();
       const start = defaults.downloads || defaults.home || "/home/deck";
@@ -93,21 +99,29 @@ export function EclipsePanel() {
         "7z",
       ]);
       if (!file?.realpath && !file?.path) return;
-      const path = file.realpath || file.path;
-      setZipPath(path);
-      setScan(null);
-      setResult("");
+      path = file.realpath || file.path;
+    } catch (err) {
+      // file picker cancel rejects the promise; ignore silently
+      return;
+    }
+    setZipPath(path);
+    setScan(null);
+    setResult("");
+    setScanning(true);
+    try {
       const scanned = await scanModZip(selectedAppId, path);
       if (scanned.status !== "success") {
         setResult(`Error: ${scanned.message}`);
+        toast(`Scan failed: ${scanned.message}`);
         return;
       }
       setScan(scanned);
     } catch (err) {
-      // file picker cancel rejects the promise; ignore silently
-      if (String(err).toLowerCase().includes("cancel")) return;
-      logError(`pickZip: ${String(err)}`);
+      logError(`pickZip/scan: ${String(err)}`);
       setResult(`Error: ${String(err)}`);
+      toast(`Scan failed: ${String(err)}`);
+    } finally {
+      setScanning(false);
     }
   };
 
@@ -223,14 +237,42 @@ export function EclipsePanel() {
         />
       </PanelSectionRow>
 
+      {selectedAppId ? (
+        <PanelSectionRow>
+          <div style={{ fontSize: "13px", fontWeight: "bold" }}>
+            {statusLoading ? (
+              <span style={{ color: "#9ca3af" }}>Checking mod status…</span>
+            ) : patched ? (
+              <span style={{ color: "#22c55e" }}>✓ Mod installed</span>
+            ) : (
+              <span style={{ color: "#9ca3af" }}>No mod installed on this game</span>
+            )}
+          </div>
+        </PanelSectionRow>
+      ) : null}
+
       {selectedAppId && modStatus && patched ? <StatusCard modStatus={modStatus} /> : null}
 
-      {selectedAppId && !patched ? (
-        <PanelSectionRow>
-          <ButtonItem layout="below" onClick={pickZip} disabled={busy}>
-            {zipPath ? "Choose a different file…" : "Choose mod file (zip/rar/7z)…"}
-          </ButtonItem>
-        </PanelSectionRow>
+      {selectedAppId && !patched && !statusLoading ? (
+        <>
+          <PanelSectionRow>
+            <ButtonItem layout="below" onClick={pickZip} disabled={busy || scanning}>
+              {scanning
+                ? "Extracting & scanning archive…"
+                : zipPath
+                ? "Choose a different file…"
+                : "Choose mod file (zip/rar/7z)…"}
+            </ButtonItem>
+          </PanelSectionRow>
+          {zipPath ? (
+            <PanelSectionRow>
+              <div style={{ fontSize: "12px", overflowWrap: "anywhere", color: "#9ca3af" }}>
+                File: {zipPath.split("/").pop()}
+                {scanning ? " — this can take a while for large archives" : ""}
+              </div>
+            </PanelSectionRow>
+          ) : null}
+        </>
       ) : null}
 
       {scan && !patched ? (
