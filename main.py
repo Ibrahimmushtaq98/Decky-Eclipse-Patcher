@@ -15,7 +15,10 @@ from eclipse_patcher import activity, launch_options, patcher, scanner, steam, u
 
 
 def _home() -> Path:
-    return Path(decky.HOME)
+    # With the "root" flag the backend's HOME is /root — use the real user's
+    # home for Steam library discovery.
+    home = getattr(decky, "DECKY_USER_HOME", None) or decky.HOME
+    return Path(home)
 
 
 def _runtime_dir() -> Path:
